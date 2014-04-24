@@ -89,10 +89,14 @@ unifs <- function(N, city) {
 
 ########
 #Function to find data in region
-distfun <- function(rdata) {
+distfun <- function(rdata, cons) {
 
 	#lat long of unique monitors
 	monssub <- substr(rdata[, 2], 1, 9)
+	
+	if(cons == "PM") {
+		monssub <- rdata[, 2]
+	}
 	rdata <- unique(data.frame(rdata[, c(4, 3)], monssub))
 	rdata <- rdata[order(rdata[, 3]), ]
 
@@ -104,6 +108,7 @@ distfun <- function(rdata) {
 	distmat <- matrix(nrow = nr, ncol = nr)
 	for(i in 1 : nrow(monitors)) {
 		distmat[i, ] <- distMeeus(monitors, monitors[i, ]) / 1000
+		distmat[i, i] <- 0
 	}
 	
 	
@@ -144,9 +149,9 @@ ndates <- function(dates, rdata, num = 3) {
 
 	
 #Function to calculate the matern function 
-matmaternf <- function(mat, opti) {
-	matrixmatern <- opti$par[1]^2 * matern(mat,
-		opti$par[2], opti$par[3])
+matmaternf <- function(mat, pars) {
+	matrixmatern <- pars[1]^2 * matern(mat,
+		pars[2], pars[3])
 	matrixmatern
 	}
 	
@@ -204,11 +209,20 @@ wtfun <- function(undate, rdata){
 	
 	
 ########	
-h11fun<-function(distmat, out, unmonid, undate, wtcomp) {
+h11fun<-function(distmat, pars, unmonid, undate, wtcomp, type = "matern") {
 	#Calculate matern function on distances 
 	#between all monitors in region
-	h11 <- matmaternf(distmat, out[[2]]) + diag(x = 1, 
-		nrow = length(distmat[, 1])) * out[[2]]$par[5]^2 
+	
+	if(type == "matern") {
+		corr <- matmaternf(distmat, pars) 
+		n <- 5
+	}else{
+		corr <- pars[1]^2 * exp(-pars[2] * distmat)
+		n <- 4
+		}
+	
+	h11 <- corr + diag(x = 1, 
+		nrow = length(distmat[, 1])) * pars[n]^2 
 
 	#Name columns/rows by all monitor IDs
 	colnames(h11) <- unmonid
@@ -228,8 +242,8 @@ h11fun<-function(distmat, out, unmonid, undate, wtcomp) {
 	
 	
 ########	
-h12fun <- function(monitors, unifpts, out, 
-	unmonid, undate, wtcomp) {
+h12fun <- function(monitors, unifpts, pars, 
+	unmonid, undate, wtcomp, type = "matern") {
 		
 		
 	#Calculate distances/matern between random points and monitors
@@ -237,10 +251,16 @@ h12fun <- function(monitors, unifpts, out,
 		nrow = length(monitors[, 1]))
 	for (i in 1 : length(monitors[, 1])) {
 		# materndist[i, ] <- eucdist(monitors[i, ], unifpts) 
-		materndist[i, ] <- distMeeus(monitors[i, ], unifpts)
+		materndist[i, ] <- distMeeus(monitors[i, ], unifpts)/1000
+		materndist[i, i] <- 0
 	}
 	
-	h12mat <- matmaternf(materndist, out[[2]]) 
+	
+	if(type == "matern") {
+		h12mat <- matmaternf(materndist, pars) 
+	}else{
+		h12mat <- pars[1]^2 * exp(-pars[2] * materndist)
+		}
 	n <- length(unifpts[, 1])
 	h12 <- 1 / n * rowSums(h12mat)
 
@@ -265,18 +285,18 @@ h12fun <- function(monitors, unifpts, out,
 #Main Function
 #########
 
-spatialpred <- function(out, dates, city, N,
-	data, num = 3) {
+spatialpred <- function(data, pars, dates, city, N,
+	cons, num = 3, type = "matern") {
 	#Find number corresponding to the city
 	unifpts <- unifs(N, city)
 	
 	#Get data with logs for region from STmodel
-	data <- out$datasubplus 
-	opt <- out$opt
+	# not for regional
+	# data <- out$datasubplus 
 	
 	#Creation of dist matrix for monitors (no jitter)
 	#reorder and discard duplicates
-	temp <- distfun(data)
+	temp <- distfun(data, cons)
 	distmat <- temp[[1]]
 	monitors <- temp[[2]]
 
@@ -285,18 +305,27 @@ spatialpred <- function(out, dates, city, N,
 	unmonid <- rownames(distmat)
 		
 	wtcomp <- wtfun(undate, data)
-	h11sub <- h11fun(distmat, out, unmonid, undate, wtcomp)
-	h12sub <- h12fun(monitors, unifpts, out, 
-		unmonid, undate, wtcomp)
+	h11sub <- h11fun(distmat, pars, unmonid, undate, wtcomp, type)
+	h12sub <- h12fun(monitors, unifpts, pars, 
+		unmonid, undate, wtcomp, type)
+		
+	if(type == "matern") {
+		n <- 4
+	}else{
+		n <- 3
+		}
 	
 	#Calculate predicted values
 	xgivw <- vector(, length = length(undate))
 	for (i in 1 : length(undate)) {
-		pars <- out[[2]]$par
-		xgivw[i] <- pars[4] + h12sub[[i]] %*% solve(h11sub[[i]]) %*%	(wtcomp[[i]] - pars[4])
+		xgivw[i] <- pars[n] + h12sub[[i]] %*% solve(h11sub[[i]]) %*%	(wtcomp[[i]] - pars[n])
 	}
 	cbind(undate, exp(xgivw))
 }
+
+
+
+
 
 
 
