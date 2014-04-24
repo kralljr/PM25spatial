@@ -47,6 +47,73 @@ library(splancs)
 library(geoR)
 library(splines)
 library(mvtnorm)
+library(geosphere)
+library(matrixcalc)
+library(timeDate)
+
+
+getd <- function(dat) {
+	whcc <- which(complete.cases(dat) & dat[, 3] > 0)
+			
+	dow <- (dayOfWeek(timeDate(dat[, 1])))
+	
+	dat <- data.frame(dat, dow)
+	colnames(dat) <- c("date", "mon", "cons", "dow")
+	dat <- dat[whcc, ]
+	dat[, 3] <- log(dat[, 3])
+	
+	dates2 <- seq(as.Date("2000-01-01", origin = "1970-01-01"), 
+		to = as.Date("2005-12-31", origin = "1970-01-01"), by = 1)
+	dates2 <- data.frame(dates2)
+		
+	unmon <- unique(dat$mon)
+	lm1 <- vector(, length = nrow(dat))
+	for(j in 1 : length(unmon)) {
+		
+		wh1 <- which(dat$mon == unmon[j])
+		dat1 <- dat[wh1, ]
+		if(nrow(dat1) > 50) {
+			dat1 <- merge(dat1, dates2, by.x = "date", by.y = "dates2", 
+				all.y = T)
+		
+		
+			temp <- try(lm(cons ~ factor(dow) + 
+				ns(date, df = 7 * 6), data = dat1)$resid)
+			if(class(temp) != "try-error") {
+
+					lm1[wh1] <- temp
+			}else{
+				print(unmon[j])
+				lm1[wh1] <- rep(NA, length(wh1))
+				} 
+		}
+		
+	}
+	list(lm1, whcc)
+
+}
+
+detrenddat <- function(monscons, class = "cons") {
+	
+	
+	if(class != "pm") {
+		monsconsd <- monscons[, 1 : 12]
+		for(i in 5 : 12) {
+			dat <- monscons[, c(1, 2, i)]
+			temp <- getd(dat)
+			monsconsd[temp[[2]], i] <- temp[[1]]
+		}
+	}else{
+		monsconsd <- monscons
+		dat <- monscons[, c(1, 2, 5)]
+		temp <- getd(dat)	
+		monsconsd[temp[[2]], 5] <- temp[[1]]
+		
+		
+		}
+
+	monsconsd
+}
 
 
 getconsdata <- function(monscons, namecomponent) {
@@ -79,34 +146,44 @@ makeNLL <- function(x, D, tau = T){
 					phi, kappa) + diag(x = 1,
 					nrow = length(D[[i]][, 1])) * tau^2  
 				#Find MVN lhood for mean mu and var S
+				tpd <- try(is.positive.definite(S[[i]]))
+                if(class(tpd) != "try-error"){
+                	if(tpd) {
 				dmv[i] <- dmvnorm(x[[i]],
 					rep(mu, length(x[[i]])),
-                  S[[i]], log = TRUE)
+                                                  S[[i]], log = TRUE)
+                       }else{dmv[i] <- -10^10}
+                              }else{dmv[i] <- -10^10}
 			}
 		print(p)
 		print(-sum(dmv))
-		}
+                        out <- -sum(dmv)
+#                        if(is.nan(-sum(dmv))){browser()}
+                        if(is.nan(-sum(dmv))){
+                          out <- 10^10
+                        }
+                           out
+                      }
 	}
 	
 
 
 		
-stmodlog <- function(data, namecomponent, region = NULL, n, s, u, 
-	l = c(0.0001, 0.0001, 0.0001, -100, 0.0001),
-	tau = T) {
 		
 		
-	if(namecomponent != "PM2.5") {
+getalldata <- function(data, namecomponent, region = NULL) {
+	
+	if(namecomponent != "PM2.5" & namecomponent != "PM") {
 		datasub <- getconsdata(data, namecomponent)
 	}else {
 		datasub <- data
-		datasub[, 6] <- as.character(data[, 6])
+		datasub[, 6] <- as.character(data[, 2])
 	}
 
 	#Find complete cases where level>0
 	datasub <- datasub[complete.cases(datasub), ]
 	datasubplus <- datasub[which(datasub[, 5] > 0),]
-
+	
 	#Subset data based on region of interest
 	if(!is.null(region)) {
 		if(region == "nw") {
@@ -141,7 +218,20 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 		 		datasubplus[, 4] > -89.3),]
 		 	}
  	}
+ 	
+ 	datasubplus
 	
+}	
+
+
+
+	
+stmodlog <- function(data, namecomponent, region = NULL, n, s, u, 
+	l = c(0.0001, 0.0001, 0.0001, -100, 0.0001),
+	tau = T, detrend = F) {
+		
+	datasubplus <- getalldata(data, namecomponent, region)	
+		
 	#Find unique dates
 	dates <- sort(unique(datasubplus[, 1]))
 	
@@ -171,9 +261,15 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
    		
    		#wtvec is list, each element is matrix of 
    			#monid (no collocated) and logged levels *AVG*
-   		wtvec[[i]] <- cbind(as.numeric(names(newlevels)),
-   			log(newlevels))
-   			
+		if(detrend == F) {
+	   		wtvec[[i]] <- cbind(as.numeric(names(newlevels)),
+	   			log(newlevels))
+	   	}else{
+	   		wtvec[[i]] <- cbind(as.numeric(names(newlevels)),
+	   			(newlevels))
+	   		
+	   		}
+
    		wtvec[[i]] <- wtvec[[i]][which(complete.cases(wtvec[[i]]) == TRUE), ]
 		}
 	
@@ -205,13 +301,13 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 	#Find distances between all monitors
 	# distmat <- as.matrix(dist(moncoord, method = "euclidean"))
 	#better distance, in kM
-	nr <- nrow(moncoord)
-	distmat <- matrix(nrow = nr, ncol = nr)
-	for(i in 1 : nrow(moncoord)) {
-		distmat[i, ] <- distMeeus(moncoord, moncoord[i, ]) / 1000
-		distmat[i, i] <- 0
-	}
-	# distmat <- as.matrix(dist(moncoord))
+	 nr <- nrow(moncoord)
+	 distmat <- matrix(nrow = nr, ncol = nr)
+	 for(i in 1 : nrow(moncoord)) {
+		 distmat[i, ] <- distMeeus(moncoord, moncoord[i, ]) / 1000
+		 distmat[i, i] <- 0
+	 }
+	#distmat <- as.matrix(dist(moncoord))
 	#Name columns/rows with monitor ids
 	colnames(distmat) <- uniquemon[, 1]
 	rownames(distmat) <- uniquemon[, 1]
@@ -234,7 +330,7 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 	#Optimize likelihood
 	opt <- optim(s, nll, method = "L-BFGS-B",
 		lower = l,
-		upper = u, hessian = TRUE)
+		upper = u, hessian = TRUE, control = list(maxit = 500, parscale = c(1, 10, 1, 1, 1)))
 
 	listall <- list(datasubplus, opt)
 	names(listall) <- c("datasubplus", "opt")
