@@ -43,13 +43,14 @@
 
 
 #Load required packages
+lloc <- "/home/bst/student/jkrall/Rlibrary"
 library(splancs)
 library(geoR)
 library(splines)
 library(mvtnorm)
-library(geosphere)
-library(matrixcalc)
-library(timeDate)
+library(geosphere, lib.loc = lloc)
+library(matrixcalc, lib.loc = lloc)
+library(timeDate, lib.loc = lloc)
 
 
 getd <- function(dat) {
@@ -124,15 +125,22 @@ getconsdata <- function(monscons, namecomponent) {
 }
 
 #Function to maximize likelihood
-makeNLL <- function(x, D, tau = T){
+makeNLL <- function(x, D, tau = T, type = "matern"){
 	    function(p){
 	    	#set parameters
 			sigma <- p[1]
 			phi <- p[2]
-			kappa <- p[3]
-      	 	mu <- p[4]
+                        if(type == "matern") {
+                             kappa <- p[3]
+                             mu <- p[4]
+                             n <- 5
+
+                        }else{
+                            mu <- p[3]
+                            n <- 4
+                        }
       	 	if(tau == T) {
-      			tau <- p[5]
+      			tau <- p[n]
       		}else {
       			tau <- 0
       		}
@@ -142,8 +150,13 @@ makeNLL <- function(x, D, tau = T){
 			S <- vector(mode="list",length=length(x))
 			for(i in 1 : length(x)) {
 				#Set matern covariance of distances
-				S[[i]] <- sigma^2 * matern(D[[i]],
-					phi, kappa) + diag(x = 1,
+                                if(type == "matern") {
+                                    spatcov <- matern(D[[i]], phi, kappa)
+                                }else{
+
+                                    spatcov <- exp(-phi * D[[i]])
+                                }
+				S[[i]] <- sigma^2 * spatcov + diag(x = 1,
 					nrow = length(D[[i]][, 1])) * tau^2  
 				#Find MVN lhood for mean mu and var S
 				tpd <- try(is.positive.definite(S[[i]]))
@@ -165,7 +178,6 @@ makeNLL <- function(x, D, tau = T){
                            out
                       }
 	}
-	
 
 
 		
@@ -230,10 +242,55 @@ getalldata <- function(data, namecomponent, region = NULL, detrend = T) {
 	
 stmodlog <- function(data, namecomponent, region = NULL, n, s, u, 
 	l = c(0.0001, 0.0001, 0.0001, -100, 0.0001),
-	tau = T, detrend = F) {
+	tau = T, detrend = F, type1 = "matern") {
 		
-	datasubplus <- getalldata(data, namecomponent, region, detrend = detrend)	
 		
+	if(namecomponent != "PM2.5") {
+		datasub <- getconsdata(data, namecomponent)
+	}else {
+		datasub <- data
+		datasub[, 6] <- as.character(data[, 2])
+	}
+
+	#Find complete cases where level>0
+	datasub <- datasub[complete.cases(datasub), ]
+	datasubplus <- datasub[which(datasub[, 5] > 0),]
+
+	#Subset data based on region of interest
+	if(!is.null(region)) {
+		if(region == "nw") {
+			datasubplus <- 
+				datasubplus[which(datasubplus[, 3] > 41.9 & 
+				datasubplus[, 4] <= -109),] 
+		}else if(region == "nmw") {
+			datasubplus <- 
+				datasubplus[which(datasubplus[, 3] > 40.9 & 			
+				datasubplus[, 4] > -109 & 
+				datasubplus[, 4] <= -86.11),]
+		}else if(region == "ne") {
+			datasubplus <- 
+				rbind(datasubplus[which(datasubplus[, 3] > 36.45 & 
+				datasubplus[, 4] > -86.11),],
+		 		datasubplus[which(datasubplus[, 3] > 36.45 & 			
+		 		datasubplus[, 3] <= 40.9 & 
+		 		datasubplus[, 4] > -89.3 & 
+		 		datasubplus[, 4] <= -86.11),])
+		 }else if(region == "sw") {
+		 	datasubplus <- 
+		 		datasubplus[which(datasubplus[, 3] <= 41.9 & 			
+		 		datasubplus[, 4] <= -109),]
+		 }else if(region == "smw") {
+		 	datasubplus <- 
+		 		datasubplus[which(datasubplus[, 3] <= 40.9 & 			
+		 		datasubplus[, 4] > -109 & 
+		 		datasubplus[, 4] <= -89.3),]
+		 }else	if(region == "se") {
+		 	datasubplus <- 
+		 		datasubplus[which(datasubplus[, 3] <= 36.45 & 			
+		 		datasubplus[, 4] > -89.3),]
+		 	}
+ 	}
+	
 	#Find unique dates
 	dates <- sort(unique(datasubplus[, 1]))
 	
@@ -328,12 +385,48 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 	#wt is observations, matchdist is matrix of distances 
 		#for day i
 	#Maximize likelihood
-	nll <- makeNLL(wt, matchdist, tau = tau)
+	nll <- makeNLL(wt, matchdist, tau = tau, type = type1)
+        ps <- c(1, 10, 1, 1, 1)
+        if(type1 != "matern") {
+            l <- l[-3]
+            u <- u[-3]
+            ps <- ps[-3]
+            ps[2] <- 0.01
+            s <- s[-3]
+            l[2] <- 0.001
+        }
+
+        if(type1 == "matern" & namecomponent == "PM2.5" & is.null(region)) {
+            ps[2] <- 1
+            print(ps)
+
+        }
+
+        if(type1 == "matern" & namecomponent == "silicon" & region == "nmw") {
+            #u[3] <- 100
+            ps[2] <- 1
+        }
+        
 	#Optimize likelihood
 	opt <- optim(s, nll, method = "L-BFGS-B",
 		lower = l,
-		upper = u, hessian = TRUE, control = list(maxit = 500, parscale = c(1, 10, 1, 1, 1)))
+		upper = u, hessian = TRUE, control = list(maxit = 500, parscale = ps))
 
+        if(opt$conv != 0) {
+            ps[2] <- 1
+            if(type != "matern") {
+                ps[2] <- 0.001
+            }
+            opt <- optim(s, nll, method = "L-BFGS-B",
+                      lower = l,
+                      upper = u, hessian = TRUE, control = list(maxit = 500, parscale = ps))
+            if(opt$conv != 0){
+                print("error: did not converge")
+                print(c(opt$conv, opt$message))
+            }
+        }
+
+        
 	listall <- list(datasubplus, opt)
 	names(listall) <- c("datasubplus", "opt")
 	listall
@@ -341,5 +434,6 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 	
 	# list(wt, matchdist, distmat, wtvecn)
 }
+
 
 # save.image(file="STmodellog.RData")
