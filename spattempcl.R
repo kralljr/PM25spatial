@@ -171,7 +171,7 @@ makeNLL <- function(x, D, tau = T){
 		
 		
 		
-getalldata <- function(data, namecomponent, region = NULL) {
+getalldata <- function(data, namecomponent, region = NULL, detrend = T) {
 	
 	if(namecomponent != "PM2.5" & namecomponent != "PM") {
 		datasub <- getconsdata(data, namecomponent)
@@ -182,8 +182,10 @@ getalldata <- function(data, namecomponent, region = NULL) {
 
 	#Find complete cases where level>0
 	datasub <- datasub[complete.cases(datasub), ]
-	datasubplus <- datasub[which(datasub[, 5] > 0),]
-	
+
+	if(detrend == F) {
+		   datasubplus <- datasub[which(datasub[, 5] > 0),]
+	}	
 	#Subset data based on region of interest
 	if(!is.null(region)) {
 		if(region == "nw") {
@@ -230,7 +232,7 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 	l = c(0.0001, 0.0001, 0.0001, -100, 0.0001),
 	tau = T, detrend = F) {
 		
-	datasubplus <- getalldata(data, namecomponent, region)	
+	datasubplus <- getalldata(data, namecomponent, region, detrend = detrend)	
 		
 	#Find unique dates
 	dates <- sort(unique(datasubplus[, 1]))
