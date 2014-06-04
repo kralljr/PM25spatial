@@ -408,9 +408,12 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 
         }
 
-        if(type1 == "matern" & namecomponent == "silicon" & region == "nmw") {
-            #u[3] <- 100
-            ps[2] <- 1
+        if(type1 == "matern" & namecomponent == "silicon" & !is.null(region)) {
+        	
+        	if(region == "nmw") {
+            	#u[3] <- 100
+            	ps[2] <- 1
+            }
         }
         
 	#Optimize likelihood
