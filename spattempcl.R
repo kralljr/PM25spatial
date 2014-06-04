@@ -254,8 +254,14 @@ stmodlog <- function(data, namecomponent, region = NULL, n, s, u,
 
 	#Find complete cases where level>0
 	datasub <- datasub[complete.cases(datasub), ]
-	datasubplus <- datasub[which(datasub[, 5] > 0),]
-
+	
+	datasubplus <- datasub
+	
+	if(detrend == F) {
+		datasubplus <- datasub[which(datasub[, 5] > 0),]
+	}
+	
+	
 	#Subset data based on region of interest
 	if(!is.null(region)) {
 		if(region == "nw") {
