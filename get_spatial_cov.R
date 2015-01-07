@@ -180,10 +180,14 @@ wtfun <- function(undate, rdata){
 			
 			#Eliminate zeroes before log
 			for (j in 1 : length(newlevels)) {
-				if(newlevels[j] == 0) {
-					newlevels[j] <- 0.00001
+				if(!is.na(newlevels[j])) {
+					if(newlevels[j] == 0) {
+						newlevels[j] <- 0.00001
 					}
-				}
+				}else{
+					browser()
+					}
+			}
 			
 			wt[[i]] <- data.frame(as.character(unique(wt[[i]][, 3])),
 				log(newlevels))
